@@ -45,8 +45,8 @@ def read_conf(fname):
         print "Unable to read {} as uid {}: {}".format(fname, os.getuid(), sys.exc_info())
         sys.exit(1)
 
-    for o in opts:
-        if o not in conf.keys()[:4]:
+    for o in opts[:4]:
+        if o not in conf:
             print "Mandatory parameter '{}' was not found in config file {}!".format(o, fname)
             sys.exit(1)
 
