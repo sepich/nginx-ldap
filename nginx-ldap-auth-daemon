@@ -1,0 +1,142 @@
+#!/usr/bin/env python
+import os
+import pwd
+import grp
+import sys
+import signal
+import base64
+import ldap
+import argparse
+from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
+
+# -----------------------------------------------------------------------------
+# Requests are processed in separate thread
+import threading
+from SocketServer import ThreadingMixIn
+class AuthHTTPServer(ThreadingMixIn, HTTPServer):
+    pass
+# -----------------------------------------------------------------------------
+# Requests are processed in separate process
+# from SocketServer import ForkingMixIn
+# class AuthHTTPServer(ForkingMixIn, HTTPServer):
+#    pass
+# -----------------------------------------------------------------------------
+# Requests are processed with UNIX sockets
+# Listen = "/tmp/auth.sock"
+# import threading
+# from SocketServer import ThreadingUnixStreamServer
+# class AuthHTTPServer(ThreadingUnixStreamServer, HTTPServer):
+#    pass
+# -----------------------------------------------------------------------------
+conf = {}
+
+
+def read_conf(fname):
+    '''read file in pam_ldap format'''
+    global conf
+    opts = ['host', 'base', 'binddn', 'bindpw', 'ssl']
+    try:
+        with open(fname) as f:
+            for line in f:
+                data = line.strip().split()
+                if len(data) > 1 and data[0] in opts:
+                    conf[data[0]] = ' '.join(data[1:])
+    except:
+        print "Unable to read {} as uid {}: {}".format(fname, os.getuid(), sys.exc_info())
+        sys.exit(1)
+
+    for o in opts:
+        if o not in conf.keys()[:4]:
+            print "Mandatory parameter '{}' was not found in config file {}!".format(o, fname)
+            sys.exit(1)
+
+def drop_privileges(uid_name='nobody', gid_name='nogroup'):
+    if os.getuid() != 0:
+        return
+    uid = pwd.getpwnam(uid_name).pw_uid
+    gid = grp.getgrnam(gid_name).gr_gid
+    os.setgroups([])
+    os.setgid(gid)
+    os.setuid(uid)
+
+
+def exit_handler(signal, frame):
+    sys.exit(0)
+
+
+def check_auth(user, passwd, allowusr, allowgr):
+    print (user, passwd, allowusr, allowgr)
+    proto = 'ldap://' if conf['ssl'] != 'on' else 'ldaps://'
+    for host in conf['host'].split():
+        try:
+            ldap_connection = ldap.initialize(proto + host)
+            ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_NEVER)
+            ldap_connection.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_ALLOW)
+            ldap_connection.set_option(ldap.OPT_REFERRALS, 0)  # MS AD
+            ldap_connection.simple_bind_s(conf['binddn'], conf['bindpw'])
+            data = ldap_connection.search_s(base=conf['base'], scope=ldap.SCOPE_SUBTREE, filterstr='(&(objectClass=user)(sAMAccountName=' + user + '))')
+            if data:
+                data = data[0][1]
+                # check password
+                try:
+                    ldap_connection.simple_bind_s(data['distinguishedName'][0], passwd)
+                except ldap.INVALID_CREDENTIALS:
+                    return False
+                # check allowed users
+                if allowusr and user.lower() in [x.lower().strip() for x in allowusr.split(',')]:
+                    return True
+                # check allowed groups
+                if allowgr:
+                    groups = data['memberOf']
+                    if 'msSFU30PosixMemberOf' in data.keys():
+                        groups += data['msSFU30PosixMemberOf']
+                    for g in [x.lower().strip() for x in allowgr.split(',')]:
+                        for group in groups:
+                            if group.lower().startswith('cn={},'.format(g)):
+                                return True
+                # user found and no restrictions
+                if not allowusr and not allowgr:
+                    return True
+                # user found but not in allowed range
+                break
+        finally:
+            if ldap_connection:
+                ldap_connection.unbind()
+    return False
+
+
+class LDAPAuthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        try:
+            auth_header = self.headers.getheader('Authorization')
+            if auth_header and auth_header.lower().startswith('basic '):
+                user, passwd = base64.b64decode(auth_header[6:]).split(':', 1)
+                if check_auth(user, passwd, self.headers.getheader('X-Ldap-Allowed-Usr'), self.headers.getheader('X-Ldap-Allowed-Grp')):
+                    self.send_response(200)
+                    return
+            self.send_response(401)
+            realm = self.headers.getheader('X-Ldap-Realm')
+            if not realm:
+                realm = 'Authorization required'
+            self.send_header('WWW-Authenticate', 'Basic realm="{}"'.format(realm))
+            self.send_header('Cache-Control', 'no-cache')
+        except:
+            self.send_response(500)
+            self.send_header('X-Error-Message', sys.exc_info()[1])
+        finally:
+            self.end_headers()
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="""Simple Nginx LDAP authentication helper.""")
+    parser.add_argument('--host', default="localhost", help="host to bind (Default: localhost)")
+    parser.add_argument('-p', '--port', type=int, default=8888, help="port to bind (Default: 8888)")
+    parser.add_argument('-c', '--config', default='/etc/pam_ldap.conf', help="config with LDAP creds (Default: /etc/pam_ldap.conf)")
+    args = parser.parse_args()
+
+    read_conf(args.config)
+    drop_privileges()
+    signal.signal(signal.SIGINT, exit_handler)
+
+    server = AuthHTTPServer((args.host, args.port), LDAPAuthHandler)
+    server.serve_forever()
