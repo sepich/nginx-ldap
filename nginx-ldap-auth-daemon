@@ -32,7 +32,7 @@ conf = {}
 
 
 def read_conf(fname):
-    '''read file in pam_ldap format'''
+    """read file in pam_ldap format"""
     global conf
     opts = ['host', 'base', 'binddn', 'bindpw', 'ssl']
     try:
@@ -50,6 +50,7 @@ def read_conf(fname):
             print "Mandatory parameter '{}' was not found in config file {}!".format(o, fname)
             sys.exit(1)
 
+
 def drop_privileges(uid_name='nobody', gid_name='nogroup'):
     if os.getuid() != 0:
         return
@@ -65,7 +66,7 @@ def exit_handler(signal, frame):
 
 
 def check_auth(user, passwd, allowusr, allowgr):
-    print (user, passwd, allowusr, allowgr)
+    """check password and group membership"""
     proto = 'ldap://' if conf['ssl'] != 'on' else 'ldaps://'
     for host in conf['host'].split():
         try:
@@ -73,6 +74,7 @@ def check_auth(user, passwd, allowusr, allowgr):
             ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_NEVER)
             ldap_connection.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_ALLOW)
             ldap_connection.set_option(ldap.OPT_REFERRALS, 0)  # MS AD
+            ldap_connection.set_option(ldap.OPT_NETWORK_TIMEOUT, 3)
             ldap_connection.simple_bind_s(conf['binddn'], conf['bindpw'])
             data = ldap_connection.search_s(base=conf['base'], scope=ldap.SCOPE_SUBTREE, filterstr='(&(objectClass=user)(sAMAccountName=' + user + '))')
             if data:
@@ -94,11 +96,10 @@ def check_auth(user, passwd, allowusr, allowgr):
                         for group in groups:
                             if group.lower().startswith('cn={},'.format(g)):
                                 return True
-                # user found and no restrictions
-                if not allowusr and not allowgr:
-                    return True
-                # user found but not in allowed range
-                break
+                # user found but not in allowed
+                return False if allowusr or allowgr else True
+        except (ldap.CONNECT_ERROR, ldap.SERVER_DOWN):
+            pass  # try next server
         finally:
             if ldap_connection:
                 ldap_connection.unbind()
