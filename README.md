@@ -7,7 +7,7 @@ Unfortunately that one is synchronous, thus worker is locked while communicating
 
 ### How it works?
 Auth decision is made based on results of subrequest. Consider this example:
-```
+```nginx
 location / {
   auth_request /auth-proxy;
   ...
@@ -19,7 +19,7 @@ location = /auth-proxy {
 ```
 Request comes for `/index.html` and falls to `/` location in this case. It would not be served, but subrequest made to `http://127.0.0.1:8888` containing login:pass from original request. And then depending on subrequest response (200/401) file serving would continue.
 
-You guess it, `nginx-ldap-auth-daemon` is listening on `localhost:8888` and actually doing LDAP requests.
+And you guess right, it is `nginx-ldap-auth-daemon` who is listening on `127.0.0.1:8888` and actually doing LDAP requests.
 
 ### Installation
 Example for Debian Jessie:
@@ -30,9 +30,9 @@ systemctl daemon-reload
 systemctl enable nginx-ldap-auth.service
 systemctl start nginx-ldap-auth.service
 ```
-By default LDAP connection params are read from `/etc/pam_ldap.conf`, so daemon is started as `root` and then drops privileges. To specify another file, use `-c` switch:
+By default LDAP connection params are read from `/etc/pam_ldap.conf`, so daemon is started as `root` and then drops privileges. To specify another file, use `-c` switch in `.service` unit file:
 ```
-/etc/nginx/nginx-ldap-auth-daemon -h
+$ /etc/nginx/nginx-ldap-auth-daemon -h
 usage: nginx-ldap-auth-daemon [-h] [--host HOST] [-p PORT] [-c CONFIG]
 
 Simple Nginx LDAP authentication helper.
@@ -44,8 +44,8 @@ optional arguments:
   -c CONFIG, --config CONFIG
                         config with LDAP creds (Default: /etc/pam_ldap.conf)
 ```
-Only 5 values are read from this file, here is example:
-```
+Only these 5 values are used from [the config](https://linux.die.net/man/5/pam_ldap) (rest is skipped):
+```nginx
 host 192.168.0.1 192.168.0.2
 base DC=test,DC=local
 binddn ldapproxy@test
@@ -63,8 +63,8 @@ If no `X-Ldap-Allowed-Usr`/`X-Ldap-Allowed-Grp` specified - any user with valid 
 User and Groups names are case insensitive.
 
 Here is example of adding auth for [aptly](https://www.aptly.info/doc/api/) REST API with separation of ACLs per URI:
-```
-proxy_cache_path /var/cache/nginx/auth_cache  keys_zone=auth_cache:10m;
+```nginx
+proxy_cache_path /var/cache/nginx/auth_cache keys_zone=auth_cache:10m;
 upstream aptly {
     server localhost:8080;
 }
