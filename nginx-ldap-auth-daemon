@@ -79,6 +79,9 @@ def check_auth(user, passwd, allowusr, allowgr):
             data = ldap_connection.search_s(base=conf['base'], scope=ldap.SCOPE_SUBTREE, filterstr='(&(objectClass=user)(sAMAccountName=' + user + '))')
             if data:
                 data = data[0][1]
+                # check if search found user
+                if 'distinguishedName' not in data:
+                    return False
                 # check password
                 try:
                     ldap_connection.simple_bind_s(data['distinguishedName'][0], passwd)
