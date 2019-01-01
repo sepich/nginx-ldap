@@ -22,7 +22,20 @@ Request comes for `/index.html` and falls to `/` location in this case. It would
 And you guess right, it is `nginx-ldap-auth-daemon` who is listening on `127.0.0.1:8888` and actually doing LDAP requests.
 
 ### Installation
-Example for Debian Jessie:
+Docker image `sepa/nginx-ldap` available:
+```
+  nginx-ldap:
+    container_name: nginx-ldap
+    image: sepa/nginx-ldap
+    volumes:
+      - /etc/pam_ldap.conf:/etc/pam_ldap.conf:ro
+    command:
+      - /nginx-ldap-auth-daemon
+      - --host=0.0.0.0
+    mem_limit: 64m
+    restart: always
+```
+Or here is systemd example for Debian Jessie:
 ```bash
 cp nginx-ldap-auth.service /etc/systemd/system/
 cp nginx-ldap-auth-daemon /etc/nginx/
