@@ -68,6 +68,7 @@ def exit_handler(signal, frame):
 def check_auth(user, passwd, allowusr, allowgr):
     """check password and group membership"""
     proto = 'ldap://' if conf['ssl'] != 'on' else 'ldaps://'
+    ldap_connection = None
     for host in conf['host'].split():
         try:
             ldap_connection = ldap.initialize(proto + host)
